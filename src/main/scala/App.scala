@@ -1,17 +1,14 @@
+import java.sql.Date
+
 import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model._
 import akka.http.scaladsl.server.Directives._
 import akka.stream.ActorMaterializer
-import akka.stream.scaladsl.Source
-import akka.util.ByteString
 
-import scala.concurrent.Future
 import scala.io.StdIn
-import scala.util.Random
+import scala.math.Ordering.Implicits._
 
-import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
-import spray.json.DefaultJsonProtocol._
 
 object App extends App {
 
@@ -20,28 +17,35 @@ object App extends App {
 
   implicit val executionContext = system.dispatcher
 
-  val numbers = Source.fromIterator(() => Iterator.continually(Random.nextInt()))
+  val data = List(
+    Map("group" -> "broadcaster", "user" -> "user01", "date" -> Date.valueOf("2019-06-10")),
+    Map("group" -> "advertiser", "user" -> "user01", "date" -> Date.valueOf("2019-06-10")),
+    Map("group" -> "ad-agency", "user" -> "user01", "date" -> Date.valueOf("2019-06-10")),
+    Map("group" -> "broadcast", "user" -> "user01", "date" -> Date.valueOf("2019-06-10"))
+  )
 
-  final case class Item(name: String, id: Long)
 
-  final case class Order(items: List[Item])
-
-  var orders: List[Item] = (1L to 10L).map(Item("name", _)).toList
-
-  implicit val itemFormat = jsonFormat2(Item)
-  implicit val orderFormat = jsonFormat1(Order)
-
-  def fetchItem(itemId: Long): Future[Option[Item]] = Future {
-    orders.find(_.id == itemId)
+  def heavyQuery(group: String, metric: String, startDate: String, endDate: String): String = {
+    val filteredData = data.filter(
+      map => map("group") == group &&
+        map("date").asInstanceOf[Date] >= Date.valueOf(startDate) &&
+        map("date").asInstanceOf[Date] <= Date.valueOf(endDate)
+    )
+    s"""{"size":${filteredData.size}}"""
   }
 
   val route = get {
-    pathPrefix("item" / LongNumber) { id =>
-      val maybeItem: Future[Option[Item]] = fetchItem(id)
-
-      onSuccess(maybeItem) {
-        case Some(item) => complete(item)
-        case None => complete(StatusCodes.NotFound)
+    path("report") {
+      get {
+        parameters(
+          'group.as[String],
+          'metric.as[String],
+          'startDate.as[String],
+          'endDate.as[String]
+        ) {
+          (group, metric, startDate, endDate) =>
+            complete(HttpEntity(ContentTypes.`application/json`, heavyQuery(group, metric, startDate, endDate)))
+        }
       }
     }
   }
